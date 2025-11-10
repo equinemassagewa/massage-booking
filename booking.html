@@ -159,6 +159,35 @@
                     continue
                 }
 
+                // Clone hours so we don't modify the original
+                const adjustedHours = { ...hours }
+
+                // Adjust Wednesday and Friday start times based on zone travel time
+                // Can't leave home before 8am Wed, 9am Fri
+                if (dayName === 'wednesday') {
+                    if (zone.zone_name === 'Home Zone') {
+                        adjustedHours.start = '08:30' // 8am + 20 min drive = 8:30 arrival
+                    } else if (zone.zone_name === 'North Zone') {
+                        adjustedHours.start = '09:00' // 8am + 35 min drive = 8:35, rounded to 9am
+                    } else if (zone.zone_name === 'South Zone') {
+                        adjustedHours.start = '09:00' // 8am + 50 min drive = 8:50, rounded to 9am
+                    } else if (zone.zone_name === 'Far South Zone') {
+                        adjustedHours.start = '09:30' // 8am + 75 min drive = 9:15, rounded to 9:30
+                    }
+                }
+
+                if (dayName === 'friday') {
+                    if (zone.zone_name === 'Home Zone') {
+                        adjustedHours.start = '09:30' // 9am + 20 min drive = 9:20, rounded to 9:30
+                    } else if (zone.zone_name === 'North Zone') {
+                        adjustedHours.start = '10:00' // 9am + 35 min drive = 9:35, rounded to 10am
+                    } else if (zone.zone_name === 'South Zone') {
+                        adjustedHours.start = '10:00' // 9am + 50 min drive = 9:50, rounded to 10am
+                    } else if (zone.zone_name === 'Far South Zone') {
+                        adjustedHours.start = '10:30' // 9am + 75 min drive = 10:15, rounded to 10:30
+                    }
+                }
+
                 const isBlocked = blockedPeriods.some(block => {
                     const blockStart = new Date(block.start_date)
                     const blockEnd = new Date(block.end_date)
@@ -178,7 +207,7 @@
 
                 if (isPreferred || hasZoneAppts) {
                     const dayAppts = appointments.filter(a => a.appointment_date === dateStr)
-                    const timeSlots = generateTimeSlots(dateStr, hours, dayAppts, duration, zone, hasZoneAppts)
+                    const timeSlots = generateTimeSlots(dateStr, adjustedHours, dayAppts, duration, zone, hasZoneAppts)
                     slots.push(...timeSlots)
                 }
 
