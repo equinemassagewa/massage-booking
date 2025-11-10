@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Massage Scheduler - Admin Dashboard</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Sample data - tomorrow's schedule
+        const SAMPLE_SCHEDULE = {
+            date: "2025-11-11", // Tomorrow
+            baseLocation: { address: "6082", lat: -31.9505, lng: 116.0361 },
+            appointments: [
+                {
+                    id: 1,
+                    time: "10:00",
+                    clientName: "Lisa Mac",
+                    animalName: "Horse",
+                    address: "79 Gillcrist Road, Lesmurdie",
+                    postcode: "6076",
+                    type: "equine",
+                    appointmentType: "follow-up",
+                    duration: 60,
+                    price: 110,
+                    lat: -32.0057,
+                    lng: 116.0525,
+                    notes: "Follow-up session"
+                },
+                {
+                    id: 2,
+                    time: "11:45",
+                    clientName: "Sarah Chilcott-Heighway",
+                    animalName: "Horse",
+                    address: "285 Kuramun Place, Parkerville",
+                    postcode: "6081",
+                    type: "equine",
+                    appointmentType: "follow-up",
+                    duration: 60,
+                    price: 110,
+                    lat: -31.8797,
+                    lng: 116.1317,
+                    notes: "Follow-up session"
+                },
+                {
+                    id: 3,
+                    time: "13:30",
+                    clientName: "Sian Caporan",
+                    animalName: "Horse",
+                    address: "99 Reen Road, Gidgegannup",
+                    postcode: "6083",
+                    type: "equine",
+                    appointmentType: "follow-up",
+                    duration: 60,
+                    price: 110,
+                    lat: -31.7892,
+                    lng: 116.1956,
+                    notes: "Follow-up session"
+                },
+                {
+                    id: 4,
+                    time: "15:00",
+                    clientName: "Natacha",
+                    animalName: "Dog",
+                    address: "Home - 6082",
+                    postcode: "6082",
+                    type: "canine",
+                    appointmentType: "follow-up",
+                    duration: 45,
+                    price: 80,
+                    lat: -31.9505,
+                    lng: 116.0361,
+                    notes: "Follow-up session - at home"
+                }
+            ]
+        };
+
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                     Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function calculateDriveTime(distance) {
+            // Average speed 60 km/h in regional areas
+            return Math.round((distance / 60) * 60);
+        }
+
+        function calculateTravelFee(driveMinutes) {
+            if (driveMinutes <= 30) return 15;
+            if (driveMinutes <= 60) return 20;
+            if (driveMinutes <= 90) return 25;
+            return 0; // By request
+        }
+
+        function AdminDashboard() {
+            const [schedule] = useState(SAMPLE_SCHEDULE);
+            const [selectedAppointment, setSelectedAppointment] = useState(null);
+
+            // Calculate route information
+            const calculateRouteInfo = () => {
+                let totalRouteDistance = 0;
+                let totalDriveTime = 0;
+                let totalRevenue = 0;
+                let totalTravelFees = 0;
+
+                const enrichedAppointments = schedule.appointments.map((apt, index) => {
+                    // ZONE DISTANCE - from home to client (for billing)
+                    const zoneDistance = calculateDistance(
+                        schedule.baseLocation.lat,
+                        schedule.baseLocation.lng,
+                        apt.lat,
+                        apt.lng
+                    );
+                    const zoneDriveTime = calculateDriveTime(zoneDistance);
+                    const travelFee = calculateTravelFee(zoneDriveTime);
+
+                    // ROUTE DISTANCE - from previous appointment (for scheduling)
+                    let routeDistance, routeDriveTime, fromLocation;
+                    
+                    if (index === 0) {
+                        // First appointment - route from home
+                        routeDistance = zoneDistance;
+                        routeDriveTime = zoneDriveTime;
+                        fromLocation = "Home (6082)";
+                    } else {
+                        // Subsequent appointments - route from previous appointment
+                        const prevApt = schedule.appointments[index - 1];
+                        routeDistance = calculateDistance(
+                            prevApt.lat,
+                            prevApt.lng,
+                            apt.lat,
+                            apt.lng
+                        );
+                        routeDriveTime = calculateDriveTime(routeDistance);
+                        fromLocation = prevApt.address;
+                    }
+
+                    totalRouteDistance += routeDistance;
+                    totalDriveTime += routeDriveTime;
+                    totalRevenue += apt.price;
+                    totalTravelFees += travelFee;
+
+                    // Calculate arrival time (previous appointment end + route drive time)
+                    let arrivalTime = apt.time;
+                    if (index > 0) {
+                        const prevApt = schedule.appointments[index - 1];
+                        const prevEndTime = addMinutes(prevApt.time, prevApt.duration);
+                        arrivalTime = addMinutes(prevEndTime, routeDriveTime);
+                    }
+
+                    const endTime = addMinutes(apt.time, apt.duration);
+                    
+                    // Calculate when next appointment can start
+                    // If this is the last appointment, show when you're back home
+                    let nextAvailableTime, nextAvailableLocation;
+                    if (index === schedule.appointments.length - 1) {
+                        // Last appointment - calculate return home time
+                        const driveHomeTime = calculateDriveTime(zoneDistance);
+                        nextAvailableTime = addMinutes(endTime, driveHomeTime);
+                        nextAvailableLocation = "Home (6082)";
+                    } else {
+                        // Not last - check drive time to next appointment
+                        const nextApt = schedule.appointments[index + 1];
+                        const driveToNext = calculateDistance(apt.lat, apt.lng, nextApt.lat, nextApt.lng);
+                        const driveTimeToNext = calculateDriveTime(driveToNext);
+                        nextAvailableTime = addMinutes(endTime, driveTimeToNext);
+                        nextAvailableLocation = `En route to ${nextApt.clientName}`;
+                    }
+
+                    return {
+                        ...apt,
+                        // Route info (for your schedule)
+                        distanceFromPrevious: routeDistance.toFixed(1),
+                        driveTimeFromPrevious: routeDriveTime,
+                        fromLocation,
+                        // Zone info (for billing)
+                        distanceFromHome: zoneDistance.toFixed(1),
+                        driveTimeFromHome: zoneDriveTime,
+                        travelFee,
+                        // Times
+                        arrivalTime,
+                        endTime,
+                        nextAvailableTime,
+                        nextAvailableLocation,
+                        isFirst: index === 0,
+                        isLast: index === schedule.appointments.length - 1
+                    };
+                });
+
+                // Calculate drive home
+                if (enrichedAppointments.length > 0) {
+                    const lastApt = enrichedAppointments[enrichedAppointments.length - 1];
+                    const driveHome = calculateDistance(
+                        lastApt.lat,
+                        lastApt.lng,
+                        schedule.baseLocation.lat,
+                        schedule.baseLocation.lng
+                    );
+                    totalRouteDistance += driveHome;
+                    totalDriveTime += calculateDriveTime(driveHome);
+                }
+
+                return {
+                    appointments: enrichedAppointments,
+                    summary: {
+                        totalDistance: totalRouteDistance.toFixed(1),
+                        totalDriveTime,
+                        totalRevenue,
+                        totalTravelFees,
+                        totalTime: totalDriveTime + enrichedAppointments.reduce((sum, apt) => sum + apt.duration, 0),
+                        startTime: enrichedAppointments[0]?.time || "N/A",
+                        endTime: enrichedAppointments[enrichedAppointments.length - 1]?.endTime || "N/A"
+                    }
+                };
+            };
+
+            function addMinutes(time, minutes) {
+                const [hours, mins] = time.split(':').map(Number);
+                const totalMins = hours * 60 + mins + minutes;
+                const newHours = Math.floor(totalMins / 60);
+                const newMins = totalMins % 60;
+                return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
+            }
+
+            const getGoogleMapsUrl = (appointment, prevAppointment = null) => {
+                if (appointment.isFirst) {
+                    // First appointment - navigate from home
+                    return `https://www.google.com/maps/dir/?api=1&origin=6082&destination=${encodeURIComponent(appointment.address)}`;
+                } else if (prevAppointment) {
+                    // Navigate from previous appointment
+                    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(prevAppointment.address)}&destination=${encodeURIComponent(appointment.address)}`;
+                }
+                // Default to just the destination
+                return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(appointment.address)}`;
+            };
+
+            const routeInfo = calculateRouteInfo();
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 shadow-lg">
+                        <div className="max-w-7xl mx-auto">
+                            <h1 className="text-3xl font-bold mb-2">Daily Schedule Dashboard</h1>
+                            <p className="text-blue-100">
+                                {new Date(schedule.date).toLocaleDateString('en-AU', { 
+                                    weekday: 'long', 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
+                                })}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto p-6">
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Appointments</div>
+                                <div className="text-2xl font-bold text-blue-600">
+                                    {routeInfo.appointments.length}
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Total Distance</div>
+                                <div className="text-2xl font-bold text-green-600">
+                                    {routeInfo.summary.totalDistance} km
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Drive Time</div>
+                                <div className="text-2xl font-bold text-orange-600">
+                                    {routeInfo.summary.totalDriveTime} min
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Revenue</div>
+                                <div className="text-2xl font-bold text-purple-600">
+                                    ${routeInfo.summary.totalRevenue}
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Travel Fees</div>
+                                <div className="text-2xl font-bold text-indigo-600">
+                                    ${routeInfo.summary.totalTravelFees}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Day Overview */}
+                        <div className="bg-gradient-to-r from-green-50 to-blue-50 p-6 rounded-lg mb-8 border-2 border-green-200">
+                            <h2 className="text-xl font-bold mb-4 flex items-center">
+                                <span className="text-2xl mr-2">📍</span>
+                                Route Overview
+                            </h2>
+                            <div className="grid md:grid-cols-3 gap-4 text-sm">
+                                <div>
+                                    <span className="font-semibold">Start:</span> {routeInfo.summary.startTime} from home (6082)
+                                </div>
+                                <div>
+                                    <span className="font-semibold">Finish:</span> {routeInfo.summary.endTime} + drive home
+                                </div>
+                                <div>
+                                    <span className="font-semibold">Total Day:</span> ~{Math.round(routeInfo.summary.totalTime / 60)} hours
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Appointments Timeline */}
+                        <div className="space-y-4">
+                            {/* Start from home */}
+                            <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-gray-400">
+                                <div className="flex items-center">
+                                    <div className="text-3xl mr-4">🏠</div>
+                                    <div className="flex-1">
+                                        <div className="font-bold text-lg">START - Home Base</div>
+                                        <div className="text-gray-600">6082 - Ready to depart</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {routeInfo.appointments.map((apt, index) => (
+                                <div key={apt.id}>
+                                    {/* Drive segment */}
+                                    <div className="flex items-center justify-center py-2">
+                                        <div className="bg-blue-100 px-6 py-3 rounded-full border-2 border-blue-300">
+                                            <div className="flex items-center space-x-3">
+                                                <span className="text-2xl">🚗</span>
+                                                <div className="text-sm">
+                                                    <div className="font-semibold text-blue-800">
+                                                        {apt.driveTimeFromPrevious} min drive
+                                                    </div>
+                                                    <div className="text-blue-600">
+                                                        {apt.distanceFromPrevious} km • Travel fee: ${apt.travelFee}
+                                                    </div>
+                                                    <div className="text-xs text-gray-600">
+                                                        From: {apt.fromLocation}
+                                                    </div>
+                                                </div>
+                                                <a
+                                                    href={getGoogleMapsUrl(apt, index > 0 ? routeInfo.appointments[index - 1] : null)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-blue-700"
+                                                >
+                                                    Get Directions
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Appointment */}
+                                    <div 
+                                        className={`bg-white p-6 rounded-lg shadow-lg border-l-4 cursor-pointer hover:shadow-xl transition-shadow ${
+                                            apt.type === 'equine' ? 'border-green-500' : 'border-purple-500'
+                                        }`}
+                                        onClick={() => setSelectedAppointment(apt)}
+                                    >
+                                        <div className="flex items-start">
+                                            <div className="text-4xl mr-4">
+                                                {apt.type === 'equine' ? '🐴' : '🐕'}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div>
+                                                        <div className="font-bold text-xl text-gray-800">
+                                                            {apt.clientName}
+                                                        </div>
+                                                        <div className="text-gray-600">
+                                                            {apt.animalName} - {apt.appointmentType}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-2xl font-bold text-blue-600">
+                                                            {apt.time}
+                                                        </div>
+                                                        <div className="text-sm text-gray-500">
+                                                            {apt.duration} min
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-gray-50 p-4 rounded-lg mb-3">
+                                                    <div className="flex items-start space-x-2">
+                                                        <span className="text-lg">📍</span>
+                                                        <div className="flex-1">
+                                                            <div className="font-semibold text-gray-800">
+                                                                {apt.address}
+                                                            </div>
+                                                            <div className="text-sm text-gray-600 mt-1">
+                                                                Postcode: {apt.postcode}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                                                    <div className="bg-blue-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Arrive by</div>
+                                                        <div className="font-semibold text-blue-700">{apt.arrivalTime}</div>
+                                                    </div>
+                                                    <div className="bg-green-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Start</div>
+                                                        <div className="font-semibold text-green-700">{apt.time}</div>
+                                                    </div>
+                                                    <div className="bg-orange-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Finish</div>
+                                                        <div className="font-semibold text-orange-700">{apt.endTime}</div>
+                                                    </div>
+                                                    <div className="bg-purple-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Treatment Fee</div>
+                                                        <div className="font-semibold text-purple-700">${apt.price}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-indigo-50 p-3 rounded-lg border-2 border-indigo-300 mb-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <div className="text-xs font-semibold text-gray-600">NEXT AVAILABLE FOR BOOKING</div>
+                                                            <div className="text-sm text-gray-700 mt-1">{apt.nextAvailableLocation}</div>
+                                                        </div>
+                                                        <div className="bg-indigo-600 text-white px-4 py-2 rounded-lg">
+                                                            <div className="text-xs">Available at</div>
+                                                            <div className="text-lg font-bold">{apt.nextAvailableTime}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                                                    <div className="text-xs font-semibold text-gray-600 mb-2">BILLING - Zone from Home (6082)</div>
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="text-sm">
+                                                            <span className="text-gray-600">{apt.distanceFromHome} km • ~{apt.driveTimeFromHome} min from home</span>
+                                                        </div>
+                                                        <div className="bg-yellow-600 text-white px-3 py-1 rounded font-bold">
+                                                            Travel Fee: ${apt.travelFee}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {apt.notes && (
+                                                    <div className="mt-3 text-sm text-gray-600 italic">
+                                                        Note: {apt.notes}
+                                                    </div>
+                                                )}
+
+                                                <div className="mt-4 flex space-x-2">
+                                                    <a
+                                                        href={getGoogleMapsUrl(apt)}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700 flex items-center"
+                                                    >
+                                                        <span className="mr-2">🗺️</span>
+                                                        Navigate Here
+                                                    </a>
+                                                    <button className="bg-green-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-green-700 flex items-center">
+                                                        <span className="mr-2">✅</span>
+                                                        Mark Complete
+                                                    </button>
+                                                    <button className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-gray-700 flex items-center">
+                                                        <span className="mr-2">📱</span>
+                                                        Contact Client
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+
+                            {/* Drive home */}
+                            {routeInfo.appointments.length > 0 && (
+                                <>
+                                    <div className="flex items-center justify-center py-2">
+                                        <div className="bg-gray-100 px-6 py-3 rounded-full border-2 border-gray-300">
+                                            <div className="flex items-center space-x-3">
+                                                <span className="text-2xl">🚗</span>
+                                                <div className="text-sm">
+                                                    <div className="font-semibold text-gray-800">
+                                                        Drive home
+                                                    </div>
+                                                    <div className="text-gray-600">
+                                                        Return to base (6082)
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-gray-400">
+                                        <div className="flex items-center">
+                                            <div className="text-3xl mr-4">🏠</div>
+                                            <div className="flex-1">
+                                                <div className="font-bold text-lg">END - Home Base</div>
+                                                <div className="text-gray-600">Day complete! Total revenue: ${routeInfo.summary.totalRevenue + routeInfo.summary.totalTravelFees}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Daily Summary Report */}
+                        <div className="mt-8 bg-white p-6 rounded-lg shadow-lg border-2 border-blue-200">
+                            <h2 className="text-2xl font-bold mb-4 flex items-center">
+                                <span className="text-2xl mr-2">📊</span>
+                                Daily Summary Report
+                            </h2>
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <div>
+                                    <h3 className="font-semibold text-lg mb-3 text-gray-700">Revenue Breakdown</h3>
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between p-2 bg-gray-50 rounded">
+                                            <span>Treatment Fees:</span>
+                                            <span className="font-semibold">${routeInfo.summary.totalRevenue} AUD</span>
+                                        </div>
+                                        <div className="flex justify-between p-2 bg-gray-50 rounded">
+                                            <span>Travel Fees:</span>
+                                            <span className="font-semibold">${routeInfo.summary.totalTravelFees} AUD</span>
+                                        </div>
+                                        <div className="flex justify-between p-2 bg-green-100 rounded border-2 border-green-300">
+                                            <span className="font-bold">Total Revenue:</span>
+                                            <span className="font-bold text-green-700">
+                                                ${routeInfo.summary.totalRevenue + routeInfo.summary.totalTravelFees} AUD
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-lg mb-3 text-gray-700">Time & Distance</h3>
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between p-2 bg-gray-50 rounded">
+                                            <span>Total Drive Time:</span>
+                                            <span className="font-semibold">{routeInfo.summary.totalDriveTime} min</span>
+                                        </div>
+                                        <div className="flex justify-between p-2 bg-gray-50 rounded">
+                                            <span>Total Treatment Time:</span>
+                                            <span className="font-semibold">
+                                                {routeInfo.appointments.reduce((sum, apt) => sum + apt.duration, 0)} min
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between p-2 bg-gray-50 rounded">
+                                            <span>Total Distance:</span>
+                                            <span className="font-semibold">{routeInfo.summary.totalDistance} km</span>
+                                        </div>
+                                        <div className="flex justify-between p-2 bg-blue-100 rounded border-2 border-blue-300">
+                                            <span className="font-bold">Total Day Duration:</span>
+                                            <span className="font-bold text-blue-700">
+                                                {Math.floor(routeInfo.summary.totalTime / 60)}h {routeInfo.summary.totalTime % 60}m
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 pt-6 border-t">
+                                <div className="flex space-x-3">
+                                    <button className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center">
+                                        <span className="mr-2">📄</span>
+                                        Generate Invoice Report
+                                    </button>
+                                    <button className="bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 flex items-center">
+                                        <span className="mr-2">📧</span>
+                                        Send Day Summary
+                                    </button>
+                                    <button className="bg-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-700 flex items-center">
+                                        <span className="mr-2">📱</span>
+                                        Send SMS Reminders
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AdminDashboard />, document.getElementById('root'));
+    </script>
+</body>
+</html>

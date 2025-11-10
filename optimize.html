@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Massage Scheduler - Optimized Dashboard</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Sample data - tomorrow's schedule
+        const SAMPLE_SCHEDULE = {
+            date: "2025-11-11", // Tomorrow
+            baseLocation: { address: "6082", lat: -31.9505, lng: 116.0361 },
+            appointments: [
+                {
+                    id: 1,
+                    time: "10:00",
+                    clientName: "Lisa Mac",
+                    animalName: "Horse",
+                    address: "79 Gillcrist Road, Lesmurdie",
+                    postcode: "6076",
+                    type: "equine",
+                    appointmentType: "follow-up",
+                    duration: 60,
+                    price: 110,
+                    lat: -32.0057,
+                    lng: 116.0525,
+                    notes: "Follow-up session",
+                    phone: "0400 123 456",
+                    email: "lisa@example.com"
+                },
+                {
+                    id: 2,
+                    time: "11:45",
+                    clientName: "Sarah Chilcott-Heighway",
+                    animalName: "Horse",
+                    address: "285 Kuramun Place, Parkerville",
+                    postcode: "6081",
+                    type: "equine",
+                    appointmentType: "follow-up",
+                    duration: 60,
+                    price: 110,
+                    lat: -31.8797,
+                    lng: 116.1317,
+                    notes: "Follow-up session",
+                    phone: "0400 234 567",
+                    email: "sarah@example.com"
+                },
+                {
+                    id: 3,
+                    time: "13:30",
+                    clientName: "Sian Caporan",
+                    animalName: "Horse",
+                    address: "99 Reen Road, Gidgegannup",
+                    postcode: "6083",
+                    type: "equine",
+                    appointmentType: "follow-up",
+                    duration: 60,
+                    price: 110,
+                    lat: -31.7892,
+                    lng: 116.1956,
+                    notes: "Follow-up session",
+                    phone: "0400 345 678",
+                    email: "sian@example.com"
+                },
+                {
+                    id: 4,
+                    time: "15:00",
+                    clientName: "Natacha",
+                    animalName: "Dog",
+                    address: "Home - 6082",
+                    postcode: "6082",
+                    type: "canine",
+                    appointmentType: "follow-up",
+                    duration: 45,
+                    price: 80,
+                    lat: -31.9505,
+                    lng: 116.0361,
+                    notes: "Follow-up session - at home",
+                    phone: "0400 456 789",
+                    email: "natacha@example.com"
+                }
+            ]
+        };
+
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                     Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function calculateDriveTime(distance) {
+            return Math.round((distance / 60) * 60);
+        }
+
+        function calculateTravelFee(driveMinutes) {
+            if (driveMinutes <= 30) return 15;
+            if (driveMinutes <= 60) return 20;
+            if (driveMinutes <= 90) return 25;
+            return 0;
+        }
+
+        function addMinutes(time, minutes) {
+            const [hours, mins] = time.split(':').map(Number);
+            const totalMins = hours * 60 + mins + minutes;
+            const newHours = Math.floor(totalMins / 60);
+            const newMins = totalMins % 60;
+            return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
+        }
+
+        function timeToMinutes(time) {
+            const [hours, mins] = time.split(':').map(Number);
+            return hours * 60 + mins;
+        }
+
+        function AdminDashboard() {
+            const [schedule] = useState(SAMPLE_SCHEDULE);
+            const [viewMode, setViewMode] = useState('current'); // 'current' or 'optimized'
+
+            const getGoogleMapsUrl = (appointment, prevAppointment = null) => {
+                if (appointment.isFirst) {
+                    return `https://www.google.com/maps/dir/?api=1&origin=6082&destination=${encodeURIComponent(appointment.address)}`;
+                } else if (prevAppointment) {
+                    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(prevAppointment.address)}&destination=${encodeURIComponent(appointment.address)}`;
+                }
+                return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(appointment.address)}`;
+            };
+
+            // Calculate optimized schedule
+            const calculateOptimizedSchedule = () => {
+                const optimized = [...schedule.appointments];
+                let currentTime = schedule.appointments[0].time; // Start with first appointment time
+                let currentLocation = schedule.baseLocation;
+
+                return optimized.map((apt, index) => {
+                    if (index === 0) {
+                        // First appointment keeps its time
+                        currentLocation = { lat: apt.lat, lng: apt.lng };
+                        currentTime = addMinutes(apt.time, apt.duration);
+                        return { ...apt, optimizedTime: apt.time, isOptimal: true };
+                    }
+
+                    // Calculate drive time from previous location
+                    const distance = calculateDistance(
+                        currentLocation.lat,
+                        currentLocation.lng,
+                        apt.lat,
+                        apt.lng
+                    );
+                    const driveTime = calculateDriveTime(distance);
+                    
+                    // Optimal time is: previous end time + drive time
+                    const optimalTime = addMinutes(currentTime, driveTime);
+                    
+                    // Check if current scheduled time matches optimal
+                    const scheduledMinutes = timeToMinutes(apt.time);
+                    const optimalMinutes = timeToMinutes(optimalTime);
+                    const gapMinutes = scheduledMinutes - optimalMinutes;
+                    
+                    // Update for next iteration
+                    currentLocation = { lat: apt.lat, lng: apt.lng };
+                    currentTime = addMinutes(apt.time, apt.duration);
+
+                    return {
+                        ...apt,
+                        optimizedTime: optimalTime,
+                        isOptimal: gapMinutes <= 5, // 5 min buffer is acceptable
+                        gapMinutes: gapMinutes > 0 ? gapMinutes : 0,
+                        canStartEarlier: gapMinutes > 5
+                    };
+                });
+            };
+
+            // Calculate route information for current schedule
+            const calculateRouteInfo = (appointments = schedule.appointments) => {
+                let totalRouteDistance = 0;
+                let totalDriveTime = 0;
+                let totalRevenue = 0;
+                let totalTravelFees = 0;
+                let totalWastedTime = 0;
+
+                const enrichedAppointments = appointments.map((apt, index) => {
+                    // ZONE DISTANCE - from home to client (for billing)
+                    const zoneDistance = calculateDistance(
+                        schedule.baseLocation.lat,
+                        schedule.baseLocation.lng,
+                        apt.lat,
+                        apt.lng
+                    );
+                    const zoneDriveTime = calculateDriveTime(zoneDistance);
+                    const travelFee = calculateTravelFee(zoneDriveTime);
+
+                    // ROUTE DISTANCE - from previous appointment (for scheduling)
+                    let routeDistance, routeDriveTime, fromLocation;
+                    
+                    if (index === 0) {
+                        routeDistance = zoneDistance;
+                        routeDriveTime = zoneDriveTime;
+                        fromLocation = "Home (6082)";
+                    } else {
+                        const prevApt = appointments[index - 1];
+                        routeDistance = calculateDistance(
+                            prevApt.lat,
+                            prevApt.lng,
+                            apt.lat,
+                            apt.lng
+                        );
+                        routeDriveTime = calculateDriveTime(routeDistance);
+                        fromLocation = prevApt.address;
+                    }
+
+                    totalRouteDistance += routeDistance;
+                    totalDriveTime += routeDriveTime;
+                    totalRevenue += apt.price;
+                    totalTravelFees += travelFee;
+
+                    // Calculate arrival time and gaps
+                    let arrivalTime, scheduledStartTime, gapMinutes = 0;
+                    scheduledStartTime = apt.optimizedTime || apt.time;
+                    
+                    if (index === 0) {
+                        arrivalTime = scheduledStartTime;
+                    } else {
+                        const prevApt = appointments[index - 1];
+                        const prevEndTime = addMinutes(prevApt.optimizedTime || prevApt.time, prevApt.duration);
+                        arrivalTime = addMinutes(prevEndTime, routeDriveTime);
+                        
+                        // Calculate gap
+                        const arrivalMinutes = timeToMinutes(arrivalTime);
+                        const scheduledMinutes = timeToMinutes(scheduledStartTime);
+                        gapMinutes = scheduledMinutes - arrivalMinutes;
+                        if (gapMinutes > 0) {
+                            totalWastedTime += gapMinutes;
+                        }
+                    }
+
+                    const endTime = addMinutes(scheduledStartTime, apt.duration);
+                    
+                    // Calculate when next appointment can start
+                    let nextAvailableTime, nextAvailableLocation;
+                    if (index === appointments.length - 1) {
+                        const driveHomeTime = calculateDriveTime(zoneDistance);
+                        nextAvailableTime = addMinutes(endTime, driveHomeTime);
+                        nextAvailableLocation = "Home (6082)";
+                    } else {
+                        const nextApt = appointments[index + 1];
+                        const driveToNext = calculateDistance(apt.lat, apt.lng, nextApt.lat, nextApt.lng);
+                        const driveTimeToNext = calculateDriveTime(driveToNext);
+                        nextAvailableTime = addMinutes(endTime, driveTimeToNext);
+                        nextAvailableLocation = `En route to ${nextApt.clientName}`;
+                    }
+
+                    return {
+                        ...apt,
+                        distanceFromPrevious: routeDistance.toFixed(1),
+                        driveTimeFromPrevious: routeDriveTime,
+                        fromLocation,
+                        distanceFromHome: zoneDistance.toFixed(1),
+                        driveTimeFromHome: zoneDriveTime,
+                        travelFee,
+                        arrivalTime,
+                        scheduledTime: scheduledStartTime,
+                        endTime,
+                        nextAvailableTime,
+                        nextAvailableLocation,
+                        gapMinutes,
+                        hasGap: gapMinutes > 5,
+                        isFirst: index === 0,
+                        isLast: index === appointments.length - 1
+                    };
+                });
+
+                // Calculate drive home
+                if (enrichedAppointments.length > 0) {
+                    const lastApt = enrichedAppointments[enrichedAppointments.length - 1];
+                    const driveHome = calculateDistance(
+                        lastApt.lat,
+                        lastApt.lng,
+                        schedule.baseLocation.lat,
+                        schedule.baseLocation.lng
+                    );
+                    totalRouteDistance += driveHome;
+                    totalDriveTime += calculateDriveTime(driveHome);
+                }
+
+                return {
+                    appointments: enrichedAppointments,
+                    summary: {
+                        totalDistance: totalRouteDistance.toFixed(1),
+                        totalDriveTime,
+                        totalRevenue,
+                        totalTravelFees,
+                        totalWastedTime,
+                        totalTime: totalDriveTime + enrichedAppointments.reduce((sum, apt) => sum + apt.duration, 0),
+                        startTime: enrichedAppointments[0]?.scheduledTime || "N/A",
+                        endTime: enrichedAppointments[enrichedAppointments.length - 1]?.endTime || "N/A"
+                    }
+                };
+            };
+
+            const optimizedSchedule = calculateOptimizedSchedule();
+            const currentRouteInfo = calculateRouteInfo();
+            const optimizedRouteInfo = calculateRouteInfo(optimizedSchedule);
+
+            const displayInfo = viewMode === 'optimized' ? optimizedRouteInfo : currentRouteInfo;
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 shadow-lg">
+                        <div className="max-w-7xl mx-auto">
+                            <h1 className="text-3xl font-bold mb-2">Smart Schedule Dashboard</h1>
+                            <p className="text-blue-100">
+                                {new Date(schedule.date).toLocaleDateString('en-AU', { 
+                                    weekday: 'long', 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
+                                })}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto p-6">
+                        {/* Optimization Alert */}
+                        {currentRouteInfo.summary.totalWastedTime > 0 && (
+                            <div className="bg-gradient-to-r from-orange-100 to-red-100 border-2 border-orange-400 p-6 rounded-xl mb-6 shadow-lg">
+                                <div className="flex items-start">
+                                    <div className="text-4xl mr-4">⚠️</div>
+                                    <div className="flex-1">
+                                        <h3 className="text-xl font-bold text-orange-900 mb-2">
+                                            Schedule Optimization Available!
+                                        </h3>
+                                        <p className="text-orange-800 mb-4">
+                                            Your current schedule has <strong>{currentRouteInfo.summary.totalWastedTime} minutes</strong> of gaps. 
+                                            By running appointments back-to-back, you could finish <strong>
+                                            {currentRouteInfo.summary.totalWastedTime} minutes earlier</strong> or fit in additional appointments.
+                                        </p>
+                                        <div className="grid md:grid-cols-3 gap-4 text-sm">
+                                            <div className="bg-white p-3 rounded-lg">
+                                                <div className="text-gray-600">Current finish time</div>
+                                                <div className="text-xl font-bold text-orange-700">
+                                                    {currentRouteInfo.summary.endTime}
+                                                </div>
+                                            </div>
+                                            <div className="bg-white p-3 rounded-lg">
+                                                <div className="text-gray-600">Optimized finish time</div>
+                                                <div className="text-xl font-bold text-green-700">
+                                                    {optimizedRouteInfo.summary.endTime}
+                                                </div>
+                                            </div>
+                                            <div className="bg-white p-3 rounded-lg">
+                                                <div className="text-gray-600">Time saved</div>
+                                                <div className="text-xl font-bold text-blue-700">
+                                                    {currentRouteInfo.summary.totalWastedTime} min
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* View Toggle */}
+                        <div className="flex justify-center mb-6">
+                            <div className="bg-white rounded-lg shadow-lg p-2 flex space-x-2">
+                                <button
+                                    onClick={() => setViewMode('current')}
+                                    className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                        viewMode === 'current'
+                                            ? 'bg-blue-600 text-white shadow-md'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    📅 Current Schedule
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('optimized')}
+                                    className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                        viewMode === 'optimized'
+                                            ? 'bg-green-600 text-white shadow-md'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    ⚡ Optimized Schedule
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Appointments</div>
+                                <div className="text-2xl font-bold text-blue-600">
+                                    {displayInfo.appointments.length}
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Distance</div>
+                                <div className="text-2xl font-bold text-green-600">
+                                    {displayInfo.summary.totalDistance} km
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Drive Time</div>
+                                <div className="text-2xl font-bold text-orange-600">
+                                    {displayInfo.summary.totalDriveTime} min
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Revenue</div>
+                                <div className="text-2xl font-bold text-purple-600">
+                                    ${displayInfo.summary.totalRevenue}
+                                </div>
+                            </div>
+                            <div className="bg-white p-4 rounded-lg shadow">
+                                <div className="text-gray-500 text-sm mb-1">Travel Fees</div>
+                                <div className="text-2xl font-bold text-indigo-600">
+                                    ${displayInfo.summary.totalTravelFees}
+                                </div>
+                            </div>
+                            <div className={`p-4 rounded-lg shadow ${
+                                displayInfo.summary.totalWastedTime > 0 ? 'bg-red-50' : 'bg-green-50'
+                            }`}>
+                                <div className="text-gray-500 text-sm mb-1">
+                                    {viewMode === 'current' ? 'Wasted Time' : 'Time Saved'}
+                                </div>
+                                <div className={`text-2xl font-bold ${
+                                    displayInfo.summary.totalWastedTime > 0 ? 'text-red-600' : 'text-green-600'
+                                }`}>
+                                    {displayInfo.summary.totalWastedTime} min
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Appointments Timeline */}
+                        <div className="space-y-4">
+                            {/* Start from home */}
+                            <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-gray-400">
+                                <div className="flex items-center">
+                                    <div className="text-3xl mr-4">🏠</div>
+                                    <div className="flex-1">
+                                        <div className="font-bold text-lg">START - Home Base</div>
+                                        <div className="text-gray-600">6082 - Ready to depart</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {displayInfo.appointments.map((apt, index) => (
+                                <div key={apt.id}>
+                                    {/* Drive segment */}
+                                    <div className="flex items-center justify-center py-2">
+                                        <div className="bg-blue-100 px-6 py-3 rounded-full border-2 border-blue-300">
+                                            <div className="flex items-center space-x-3">
+                                                <span className="text-2xl">🚗</span>
+                                                <div className="text-sm">
+                                                    <div className="font-semibold text-blue-800">
+                                                        {apt.driveTimeFromPrevious} min drive
+                                                    </div>
+                                                    <div className="text-blue-600">
+                                                        {apt.distanceFromPrevious} km
+                                                    </div>
+                                                    <div className="text-xs text-gray-600">
+                                                        From: {apt.fromLocation}
+                                                    </div>
+                                                </div>
+                                                <a
+                                                    href={getGoogleMapsUrl(apt, index > 0 ? displayInfo.appointments[index - 1] : null)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-blue-700"
+                                                >
+                                                    Navigate
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Gap Warning (if current schedule) */}
+                                    {viewMode === 'current' && apt.hasGap && (
+                                        <div className="flex items-center justify-center py-2">
+                                            <div className="bg-red-100 px-6 py-3 rounded-full border-2 border-red-400">
+                                                <div className="flex items-center space-x-3">
+                                                    <span className="text-2xl">⏰</span>
+                                                    <div className="text-sm">
+                                                        <div className="font-bold text-red-800">
+                                                            {apt.gapMinutes} MIN GAP - Inefficient!
+                                                        </div>
+                                                        <div className="text-red-600">
+                                                            Could start at {apt.arrivalTime} instead of {apt.scheduledTime}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Appointment */}
+                                    <div 
+                                        className={`bg-white p-6 rounded-lg shadow-lg border-l-4 ${
+                                            apt.type === 'equine' ? 'border-green-500' : 'border-purple-500'
+                                        } ${apt.hasGap && viewMode === 'current' ? 'ring-2 ring-red-300' : ''}`}
+                                    >
+                                        <div className="flex items-start">
+                                            <div className="text-4xl mr-4">
+                                                {apt.type === 'equine' ? '🐴' : '🐕'}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div>
+                                                        <div className="font-bold text-xl text-gray-800">
+                                                            {apt.clientName}
+                                                        </div>
+                                                        <div className="text-gray-600">
+                                                            {apt.animalName} - {apt.appointmentType}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-2xl font-bold text-blue-600">
+                                                            {apt.scheduledTime}
+                                                        </div>
+                                                        <div className="text-sm text-gray-500">
+                                                            {apt.duration} min
+                                                        </div>
+                                                        {viewMode === 'current' && apt.hasGap && (
+                                                            <div className="text-xs text-red-600 font-semibold mt-1">
+                                                                ⚠️ Can start earlier
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-gray-50 p-4 rounded-lg mb-3">
+                                                    <div className="flex items-start space-x-2">
+                                                        <span className="text-lg">📍</span>
+                                                        <div className="flex-1">
+                                                            <div className="font-semibold text-gray-800">
+                                                                {apt.address}
+                                                            </div>
+                                                            <div className="text-sm text-gray-600 mt-1">
+                                                                Postcode: {apt.postcode}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Optimization Suggestion */}
+                                                {viewMode === 'current' && apt.hasGap && (
+                                                    <div className="bg-gradient-to-r from-orange-50 to-yellow-50 border-2 border-orange-300 p-4 rounded-lg mb-3">
+                                                        <div className="flex items-start">
+                                                            <span className="text-2xl mr-3">💡</span>
+                                                            <div className="flex-1">
+                                                                <div className="font-bold text-orange-900 mb-1">
+                                                                    Optimization Suggestion
+                                                                </div>
+                                                                <div className="text-sm text-orange-800">
+                                                                    You can arrive at {apt.arrivalTime}. Contact {apt.clientName} to reschedule 
+                                                                    from {apt.scheduledTime} to {apt.arrivalTime} to save {apt.gapMinutes} minutes.
+                                                                </div>
+                                                                <div className="mt-2 flex space-x-2">
+                                                                    <button className="bg-orange-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-orange-700">
+                                                                        📱 Call {apt.phone}
+                                                                    </button>
+                                                                    <button className="bg-yellow-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-yellow-700">
+                                                                        📧 Email Reschedule
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                                                    <div className="bg-blue-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Can arrive</div>
+                                                        <div className="font-semibold text-blue-700">{apt.arrivalTime}</div>
+                                                    </div>
+                                                    <div className="bg-green-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Start</div>
+                                                        <div className="font-semibold text-green-700">{apt.scheduledTime}</div>
+                                                    </div>
+                                                    <div className="bg-orange-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Finish</div>
+                                                        <div className="font-semibold text-orange-700">{apt.endTime}</div>
+                                                    </div>
+                                                    <div className="bg-purple-50 p-2 rounded">
+                                                        <div className="text-gray-600 text-xs">Treatment</div>
+                                                        <div className="font-semibold text-purple-700">${apt.price}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-indigo-50 p-3 rounded-lg border-2 border-indigo-300 mb-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <div className="text-xs font-semibold text-gray-600">NEXT AVAILABLE</div>
+                                                            <div className="text-sm text-gray-700 mt-1">{apt.nextAvailableLocation}</div>
+                                                        </div>
+                                                        <div className="bg-indigo-600 text-white px-4 py-2 rounded-lg">
+                                                            <div className="text-xs">Available at</div>
+                                                            <div className="text-lg font-bold">{apt.nextAvailableTime}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                                                    <div className="text-xs font-semibold text-gray-600 mb-2">BILLING - Zone from Home</div>
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="text-sm">
+                                                            <span className="text-gray-600">{apt.distanceFromHome} km • ~{apt.driveTimeFromHome} min</span>
+                                                        </div>
+                                                        <div className="bg-yellow-600 text-white px-3 py-1 rounded font-bold">
+                                                            Travel: ${apt.travelFee}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+
+                            {/* Drive home */}
+                            <div className="flex items-center justify-center py-2">
+                                <div className="bg-gray-100 px-6 py-3 rounded-full border-2 border-gray-300">
+                                    <div className="flex items-center space-x-3">
+                                        <span className="text-2xl">🚗</span>
+                                        <div className="text-sm">
+                                            <div className="font-semibold text-gray-800">Drive home</div>
+                                            <div className="text-gray-600">Return to base (6082)</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-green-400">
+                                <div className="flex items-center">
+                                    <div className="text-3xl mr-4">🏠</div>
+                                    <div className="flex-1">
+                                        <div className="font-bold text-lg">END - Home Base</div>
+                                        <div className="text-gray-600">
+                                            Finish at {displayInfo.summary.endTime} • Total: ${displayInfo.summary.totalRevenue + displayInfo.summary.totalTravelFees}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="mt-8 bg-white p-6 rounded-lg shadow-lg">
+                            <h3 className="font-bold text-lg mb-4">Actions</h3>
+                            <div className="flex flex-wrap gap-3">
+                                <button className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center">
+                                    <span className="mr-2">📄</span>
+                                    Generate Invoice Report
+                                </button>
+                                <button className="bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 flex items-center">
+                                    <span className="mr-2">📧</span>
+                                    Send Day Summary
+                                </button>
+                                <button className="bg-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-700 flex items-center">
+                                    <span className="mr-2">📱</span>
+                                    Send SMS Reminders
+                                </button>
+                                {viewMode === 'current' && currentRouteInfo.summary.totalWastedTime > 0 && (
+                                    <button className="bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 flex items-center">
+                                        <span className="mr-2">⚡</span>
+                                        Send Reschedule Requests
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AdminDashboard />, document.getElementById('root'));
+    </script>
+</body>
+</html>

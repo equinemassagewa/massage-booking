@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Massage Booking System</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Business rules and pricing
+        const BUSINESS_CONFIG = {
+            equine: {
+                name: "Equine Massage WA",
+                basePostcode: "6082",
+                pricing: {
+                    initial: { duration: 60, price: 130, label: "Initial Assessment (1 hour)" },
+                    followUpSolo: { duration: 60, price: 110, label: "Follow-up - Single Horse (1 hour)" },
+                    followUpMulti: { duration: 45, price: 110, label: "Follow-up - Multiple Horses (45 min each)" }
+                },
+                maxPerDay: 10
+            },
+            canine: {
+                name: "Canine Massage WA",
+                basePostcode: "6082",
+                pricing: {
+                    initial: { duration: 45, price: 100, label: "Initial Assessment (45 minutes)" },
+                    followUpSolo: { duration: 45, price: 80, label: "Follow-up - Single Dog (45 minutes)" },
+                    followUpMulti: { duration: 30, price: 80, label: "Follow-up - Multiple Dogs (30 min each)" }
+                },
+                maxPerDay: 15
+            }
+        };
+
+        const TRAVEL_FEES = [
+            { maxMinutes: 30, fee: 15, label: "Up to 30 minutes" },
+            { maxMinutes: 60, fee: 20, label: "30-60 minutes" },
+            { maxMinutes: 90, fee: 25, label: "60-90 minutes" },
+            { maxMinutes: Infinity, fee: 0, label: "Over 90 minutes (by request)" }
+        ];
+
+        const AVAILABILITY = {
+            monday: { available: true, start: "05:00", end: "18:00" },
+            tuesday: { available: true, start: "05:00", end: "18:00" },
+            wednesday: { available: true, start: "08:00", end: "18:00" },
+            thursday: { available: true, start: "05:00", end: "18:00" },
+            friday: { available: true, start: "09:00", end: "18:00" },
+            saturday: { available: false, start: "09:00", end: "18:00" },
+            sunday: { available: false, start: "09:00", end: "18:00" }
+        };
+
+        function BookingPortal() {
+            const [businessType, setBusinessType] = useState('equine');
+            const [step, setStep] = useState('select-business'); // select-business, booking-form, confirmation
+            const [formData, setFormData] = useState({
+                clientName: '',
+                animalName: '',
+                phone: '',
+                email: '',
+                address: '',
+                postcode: '',
+                appointmentType: 'initial',
+                multipleAnimals: false,
+                numberOfAnimals: 1,
+                preferredDate: '',
+                preferredTime: '',
+                notes: '',
+                smsReminder: true,
+                sms30MinWarning: true
+            });
+            const [calculatedInfo, setCalculatedInfo] = useState(null);
+
+            const config = BUSINESS_CONFIG[businessType];
+
+            const calculateTravelFee = (driveMinutes) => {
+                const fee = TRAVEL_FEES.find(tf => driveMinutes <= tf.maxMinutes);
+                return fee ? fee.fee : 0;
+            };
+
+            const estimateDriveTime = (postcode) => {
+                // Simplified estimation - in production this would use Google Maps API
+                const distance = Math.abs(parseInt(postcode) - 6082);
+                if (distance < 10) return 15;
+                if (distance < 50) return 30;
+                if (distance < 100) return 45;
+                if (distance < 200) return 60;
+                return 90;
+            };
+
+            const calculateAppointment = () => {
+                const driveTime = estimateDriveTime(formData.postcode);
+                const travelFee = calculateTravelFee(driveTime);
+                
+                let appointmentDuration, pricePerAnimal, totalPrice;
+                
+                if (formData.appointmentType === 'initial') {
+                    const pricing = config.pricing.initial;
+                    appointmentDuration = pricing.duration * formData.numberOfAnimals;
+                    pricePerAnimal = pricing.price;
+                } else {
+                    const pricing = formData.multipleAnimals ? config.pricing.followUpMulti : config.pricing.followUpSolo;
+                    appointmentDuration = pricing.duration * formData.numberOfAnimals;
+                    pricePerAnimal = pricing.price;
+                }
+                
+                totalPrice = (pricePerAnimal * formData.numberOfAnimals) + travelFee;
+
+                return {
+                    driveTime,
+                    travelFee,
+                    appointmentDuration,
+                    pricePerAnimal,
+                    totalPrice,
+                    totalTimeBlock: appointmentDuration + driveTime + 15 // 15 min buffer
+                };
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const calc = calculateAppointment();
+                setCalculatedInfo(calc);
+                setStep('confirmation');
+            };
+
+            const resetForm = () => {
+                setStep('select-business');
+                setFormData({
+                    clientName: '',
+                    animalName: '',
+                    phone: '',
+                    email: '',
+                    address: '',
+                    postcode: '',
+                    appointmentType: 'initial',
+                    multipleAnimals: false,
+                    numberOfAnimals: 1,
+                    preferredDate: '',
+                    preferredTime: '',
+                    notes: '',
+                    smsReminder: true,
+                    sms30MinWarning: true
+                });
+                setCalculatedInfo(null);
+            };
+
+            // Business Selection
+            if (step === 'select-business') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
+                        <div className="max-w-4xl mx-auto pt-12">
+                            <h1 className="text-4xl font-bold text-center text-gray-800 mb-4">
+                                Mobile Massage Booking
+                            </h1>
+                            <p className="text-center text-gray-600 mb-12">
+                                Professional equine and canine massage therapy across Western Australia
+                            </p>
+                            
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <button
+                                    onClick={() => {
+                                        setBusinessType('equine');
+                                        setStep('booking-form');
+                                    }}
+                                    className="bg-white p-8 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
+                                >
+                                    <div className="text-6xl mb-4 text-center">🐴</div>
+                                    <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
+                                        Equine Massage WA
+                                    </h2>
+                                    <p className="text-gray-600 text-center mb-4">
+                                        Professional massage therapy for horses
+                                    </p>
+                                    <div className="text-sm text-gray-500 space-y-1">
+                                        <p>• Initial Assessment: $130 (1 hour)</p>
+                                        <p>• Follow-up Sessions: $110</p>
+                                        <p>• Travel fees apply</p>
+                                    </div>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setBusinessType('canine');
+                                        setStep('booking-form');
+                                    }}
+                                    className="bg-white p-8 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
+                                >
+                                    <div className="text-6xl mb-4 text-center">🐕</div>
+                                    <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
+                                        Canine Massage WA
+                                    </h2>
+                                    <p className="text-gray-600 text-center mb-4">
+                                        Professional massage therapy for dogs
+                                    </p>
+                                    <div className="text-sm text-gray-500 space-y-1">
+                                        <p>• Initial Assessment: $100 (45 min)</p>
+                                        <p>• Follow-up Sessions: $80</p>
+                                        <p>• Travel fees apply</p>
+                                    </div>
+                                </button>
+                            </div>
+
+                            <div className="mt-12 bg-white p-6 rounded-xl shadow-lg">
+                                <h3 className="font-bold text-lg mb-3">Service Areas & Schedule</h3>
+                                <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-600">
+                                    <div>
+                                        <p className="font-semibold mb-2">Regular Service Area:</p>
+                                        <p>Up to 1.5 hours drive from postcode 6082</p>
+                                        <p className="mt-2 font-semibold">Special Service:</p>
+                                        <p>Margaret River region - every 6 weeks</p>
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold mb-2">Operating Hours:</p>
+                                        <p>Tuesday-Friday (primary days)</p>
+                                        <p>Saturday/Sunday by special request</p>
+                                        <p className="mt-2 text-xs text-gray-500">
+                                            Smart scheduling clusters appointments by location
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Booking Form
+            if (step === 'booking-form') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
+                        <div className="max-w-2xl mx-auto pt-8">
+                            <button
+                                onClick={() => setStep('select-business')}
+                                className="text-blue-600 hover:text-blue-800 mb-4"
+                            >
+                                ← Back to service selection
+                            </button>
+
+                            <div className="bg-white p-8 rounded-xl shadow-lg">
+                                <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                                    {config.name}
+                                </h2>
+                                <p className="text-gray-600 mb-6">Book Your Appointment</p>
+
+                                <form onSubmit={handleSubmit} className="space-y-6">
+                                    {/* Client Information */}
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Your Name *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={formData.clientName}
+                                            onChange={(e) => setFormData({...formData, clientName: e.target.value})}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            {businessType === 'equine' ? 'Horse Name' : 'Dog Name'} *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={formData.animalName}
+                                            onChange={(e) => setFormData({...formData, animalName: e.target.value})}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Phone Number *
+                                            </label>
+                                            <input
+                                                type="tel"
+                                                required
+                                                value={formData.phone}
+                                                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Email *
+                                            </label>
+                                            <input
+                                                type="email"
+                                                required
+                                                value={formData.email}
+                                                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Location */}
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Property Address *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={formData.address}
+                                            onChange={(e) => setFormData({...formData, address: e.target.value})}
+                                            placeholder="Full address including street number"
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Postcode *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={formData.postcode}
+                                            onChange={(e) => setFormData({...formData, postcode: e.target.value})}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+
+                                    {/* Appointment Type */}
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Appointment Type *
+                                        </label>
+                                        <select
+                                            required
+                                            value={formData.appointmentType}
+                                            onChange={(e) => setFormData({...formData, appointmentType: e.target.value})}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="initial">Initial Assessment - ${config.pricing.initial.price}</option>
+                                            <option value="followup">Follow-up Session - ${config.pricing.followUpSolo.price}</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Multiple Animals */}
+                                    <div>
+                                        <label className="flex items-center space-x-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={formData.multipleAnimals}
+                                                onChange={(e) => setFormData({
+                                                    ...formData, 
+                                                    multipleAnimals: e.target.checked,
+                                                    numberOfAnimals: e.target.checked ? 2 : 1
+                                                })}
+                                                className="w-5 h-5 text-blue-600"
+                                            />
+                                            <span className="text-sm font-semibold text-gray-700">
+                                                Multiple {businessType === 'equine' ? 'horses' : 'dogs'} at this location
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    {formData.multipleAnimals && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Number of {businessType === 'equine' ? 'Horses' : 'Dogs'} *
+                                            </label>
+                                            <input
+                                                type="number"
+                                                min="2"
+                                                max={businessType === 'equine' ? '10' : '15'}
+                                                required
+                                                value={formData.numberOfAnimals}
+                                                onChange={(e) => setFormData({...formData, numberOfAnimals: parseInt(e.target.value)})}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Preferred Date/Time */}
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Preferred Date *
+                                            </label>
+                                            <input
+                                                type="date"
+                                                required
+                                                value={formData.preferredDate}
+                                                onChange={(e) => setFormData({...formData, preferredDate: e.target.value})}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Preferred Time
+                                            </label>
+                                            <input
+                                                type="time"
+                                                value={formData.preferredTime}
+                                                onChange={(e) => setFormData({...formData, preferredTime: e.target.value})}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Notification Preferences */}
+                                    <div className="space-y-3 bg-blue-50 p-4 rounded-lg">
+                                        <p className="text-sm font-semibold text-gray-700">Notification Preferences</p>
+                                        <label className="flex items-center space-x-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={formData.smsReminder}
+                                                onChange={(e) => setFormData({...formData, smsReminder: e.target.checked})}
+                                                className="w-5 h-5 text-blue-600"
+                                            />
+                                            <span className="text-sm text-gray-700">
+                                                Send SMS reminder day before appointment
+                                            </span>
+                                        </label>
+                                        <label className="flex items-center space-x-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={formData.sms30MinWarning}
+                                                onChange={(e) => setFormData({...formData, sms30MinWarning: e.target.checked})}
+                                                className="w-5 h-5 text-blue-600"
+                                            />
+                                            <span className="text-sm text-gray-700">
+                                                Send SMS when therapist is 30 minutes away
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    {/* Notes */}
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Additional Notes
+                                        </label>
+                                        <textarea
+                                            value={formData.notes}
+                                            onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                                            placeholder="Special access instructions, gate codes, specific concerns, etc."
+                                            rows="4"
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                                    >
+                                        Review Booking Details
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Confirmation Page
+            if (step === 'confirmation') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
+                        <div className="max-w-2xl mx-auto pt-8">
+                            <div className="bg-white p-8 rounded-xl shadow-lg">
+                                <div className="text-center mb-8">
+                                    <div className="text-6xl mb-4">✅</div>
+                                    <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                                        Booking Request Received!
+                                    </h2>
+                                    <p className="text-gray-600">
+                                        Your appointment is pending confirmation
+                                    </p>
+                                </div>
+
+                                <div className="space-y-6">
+                                    {/* Appointment Summary */}
+                                    <div className="bg-blue-50 p-6 rounded-lg">
+                                        <h3 className="font-bold text-lg mb-4">Appointment Summary</h3>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Service:</span>
+                                                <span className="font-semibold">{config.name}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Client:</span>
+                                                <span className="font-semibold">{formData.clientName}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">{businessType === 'equine' ? 'Horse(s)' : 'Dog(s)'}:</span>
+                                                <span className="font-semibold">
+                                                    {formData.animalName} {formData.multipleAnimals && `(+${formData.numberOfAnimals - 1} more)`}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Location:</span>
+                                                <span className="font-semibold">{formData.postcode}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Preferred Date:</span>
+                                                <span className="font-semibold">{formData.preferredDate}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Pricing Breakdown */}
+                                    <div className="bg-green-50 p-6 rounded-lg">
+                                        <h3 className="font-bold text-lg mb-4">Estimated Pricing</h3>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">
+                                                    {formData.appointmentType === 'initial' ? 'Initial Assessment' : 'Follow-up Session'}
+                                                    {formData.multipleAnimals && ` x ${formData.numberOfAnimals}`}
+                                                </span>
+                                                <span className="font-semibold">
+                                                    ${calculatedInfo.pricePerAnimal * formData.numberOfAnimals} AUD
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">
+                                                    Travel Fee (~{calculatedInfo.driveTime} min drive)
+                                                </span>
+                                                <span className="font-semibold">${calculatedInfo.travelFee} AUD</span>
+                                            </div>
+                                            <div className="border-t border-green-200 pt-2 mt-2">
+                                                <div className="flex justify-between text-lg">
+                                                    <span className="font-bold">Total Estimated Cost:</span>
+                                                    <span className="font-bold text-green-700">
+                                                        ${calculatedInfo.totalPrice} AUD
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Time Estimate */}
+                                    <div className="bg-gray-50 p-6 rounded-lg">
+                                        <h3 className="font-bold text-lg mb-4">Time Allocation</h3>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Drive time:</span>
+                                                <span className="font-semibold">~{calculatedInfo.driveTime} minutes</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Treatment time:</span>
+                                                <span className="font-semibold">{calculatedInfo.appointmentDuration} minutes</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Total time block:</span>
+                                                <span className="font-semibold">~{calculatedInfo.totalTimeBlock} minutes</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Next Steps */}
+                                    <div className="bg-yellow-50 p-6 rounded-lg border-2 border-yellow-200">
+                                        <h3 className="font-bold text-lg mb-3">What Happens Next?</h3>
+                                        <ol className="space-y-2 text-sm list-decimal list-inside">
+                                            <li>You'll receive an email confirmation within 24 hours</li>
+                                            <li>We'll confirm your appointment time or suggest alternatives if needed</li>
+                                            {formData.smsReminder && <li>SMS reminder will be sent the day before your appointment</li>}
+                                            {formData.sms30MinWarning && <li>You'll receive an SMS when the therapist is 30 minutes away</li>}
+                                            <li>Invoice will be provided after the appointment</li>
+                                        </ol>
+                                    </div>
+
+                                    {/* Contact Info */}
+                                    <div className="text-center text-sm text-gray-600">
+                                        <p>Questions? Contact us:</p>
+                                        <p className="font-semibold">{formData.phone}</p>
+                                        <p className="font-semibold">{formData.email}</p>
+                                    </div>
+
+                                    <button
+                                        onClick={resetForm}
+                                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                                    >
+                                        Book Another Appointment
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+        }
+
+        ReactDOM.render(<BookingPortal />, document.getElementById('root'));
+    </script>
+</body>
+</html>
